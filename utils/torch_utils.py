@@ -42,6 +42,30 @@ def smart_inference_mode(torch_1_9=check_version(torch.__version__, '1.9.0')):
 
     return decorate
 
+def time_sync():
+    # pytorch-accurate time
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    return time.time()
+
+def load_classifier(name='resnet101', n=2):
+    # Loads a pretrained model reshaped to n-class output
+    model = torchvision.models.__dict__[name](pretrained=True)
+
+    # ResNet model properties
+    # input_size = [3, 224, 224]
+    # input_space = 'RGB'
+    # input_range = [0, 1]
+    # mean = [0.485, 0.456, 0.406]
+    # std = [0.229, 0.224, 0.225]
+
+    # Reshape output to n classes
+    filters = model.fc.weight.shape[1]
+    model.fc.bias = nn.Parameter(torch.zeros(n), requires_grad=True)
+    model.fc.weight = nn.Parameter(torch.zeros(n, filters), requires_grad=True)
+    model.fc.out_features = n
+    return model
+
 
 def smartCrossEntropyLoss(label_smoothing=0.0):
     # Returns nn.CrossEntropyLoss with label smoothing enabled for torch>=1.10.0

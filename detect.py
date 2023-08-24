@@ -33,6 +33,9 @@ import os
 import platform
 import sys
 from pathlib import Path
+import pyrealsense2 as rs
+import pyrealsense2 as rs
+
 
 import torch
 
@@ -81,6 +84,29 @@ def run(
         dnn=False,  # use OpenCV DNN for ONNX inference
         vid_stride=1,  # video frame-rate stride
 ):
+    # Create a RealSense pipeline
+    pipeline = rs.pipeline()
+    config = rs.config()
+    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+
+    # Start the pipeline
+    pipeline.start(config)
+
+    for path, im, im0s, vid_cap, s in dataset:
+        with dt[0]:
+            # Retrieve a frame from the RealSense camera
+            frames = pipeline.wait_for_frames()
+            depth_frame = frames.get_depth_frame()
+            color_frame = frames.get_color_frame()
+        
+        # Convert the color frame to an image array
+        im0 = np.asanyarray(color_frame.get_data())
+        im0 = cv2.cvtColor(im0, cv2.COLOR_BGR2RGB)
+
+        # Release the RealSense pipeline
+    pipeline.stop()
+
     source = str(source)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
     is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
@@ -90,6 +116,7 @@ def run(
     if is_url and is_file:
         source = check_file(source)  # download
 
+    
     # Directories
     save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run
     (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
@@ -250,6 +277,9 @@ def parse_opt():
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
     print_args(vars(opt))
     return opt
+
+
+    
 
 
 def main(opt):
