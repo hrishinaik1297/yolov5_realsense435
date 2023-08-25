@@ -109,6 +109,18 @@ def detect(save_img=False):
     if device.type != 'cpu':
         model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
     t0 = time.time()
+
+    
+
+    # FPS 
+    fps_start_time = time.time()
+    fps_counter = 0
+
+    # Initialize variables for object tracking
+    prev_centroid_x_mm = None
+    prev_centroid_y_mm = None
+
+    
     while True:
     #for path, img, im0s, vid_cap in dataset:
         save_img = True
@@ -142,6 +154,12 @@ def detect(save_img=False):
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
 
+        
+
+
+
+            
+            
         # Process detections
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
@@ -154,6 +172,9 @@ def detect(save_img=False):
             #txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
             s += '%gx%g ' % img.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+                
+            
+
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -171,27 +192,100 @@ def detect(save_img=False):
                         with open(txt_path + '.txt', 'a') as f:
                             f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
-                    if save_img or view_img:  # Add bbox to image
+
+
+                    # Display FPS 
+
+                    fps_counter += 1
+                    if time.time() - fps_start_time >= 1:
+                        fps = fps_counter / (time.time() - fps_start_time)
+                        fps_start_time = time.time()
+                        fps_counter = 0
+
+                        # Display FPS on the screen
+                        cv2.putText(im0, f'FPS: {fps:.2f}', (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+                    # Assuming you have a conversion factor: pixels to millimeters
+                    conversion_factor = 0.1  # Example conversion factor: 1 pixel = 0.1 mm
+
+                    if save_img or view_img:
                         label = f'{names[int(cls)]} {conf:.2f}'
+
+                        centroid_x = int((xyxy[0] + xyxy[2]) / 2)
+                        centroid_y = int((xyxy[1] + xyxy[3]) / 2)
+                        centroid_x_mm = centroid_x * conversion_factor
+                        centroid_y_mm = centroid_y * conversion_factor
+
+                        radius = 5
+                        color = (255, 0, 0)
+                        thickness = 3
+                        cv2.circle(im0, (centroid_x, centroid_y), radius, color, thickness)
+
+                        font_scale = 0.5
+                        font_color = (255, 255, 255)
+                        font_thickness = 1
+                        text = f'(X: {centroid_x_mm:.2f} mm, Y: {centroid_y_mm:.2f} mm)'
+                        text_size, _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+                        text_origin = (centroid_x - text_size[0] // 2, centroid_y + text_size[1] // 2)
+                        #cv2.putText(im0, text, text_origin, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_thickness, lineType=cv2.LINE_AA)
+
                         plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=3)
-                        #############################################
-                        d1, d2 = int((int(xyxy[0])+int(xyxy[2]))/2), int((int(xyxy[1])+int(xyxy[3]))/2)
-                        zDepth = depth.get_distance(int(d1),int(d2))  # by default realsense returns distance in meters
-                        tl = 3 #line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
-                        tf = max(tl - 1, 1)  # font thickness
-                        cv2.putText(im0, str(round((zDepth* 39.3701 ),2))+"in "+str(round((zDepth* 100 ),2))+" cm", (d1, d2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
-                        #print(zDepth, d1, d2)
-                        #############################################
+
+                        d1, d2 = int((int(xyxy[0]) + int(xyxy[2])) / 2), int((int(xyxy[1]) + int(xyxy[3])) / 2)
+                        zDepth = depth.get_distance(d1, d2)
+                        zDepth_inches = zDepth * 39.3701
+                        zDepth_cm = zDepth * 100
+
+                        depth_text = f'Depth: {zDepth_cm:.2f} cm'
+                        depth_origin = (centroid_x - text_size[0] // 2, centroid_y + text_size[1] // 2 + text_size[1])
+                        cv2.putText(im0, depth_text, depth_origin, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_thickness, lineType=cv2.LINE_AA)
+
+
+
+
+                        if prev_centroid_x_mm is not None and prev_centroid_y_mm is not None:
+                            # Calculate movement in x and y directions
+                            delta_x = centroid_x_mm - prev_centroid_x_mm
+                            delta_y = centroid_y_mm - prev_centroid_y_mm
+
+                            # Calculate distance from the frame center
+                            frame_center_x = im0.shape[1] / 2  # X-coordinate of the frame center
+                            frame_center_y = im0.shape[0] / 2  # Y-coordinate of the frame center
+                            distance_from_center_x = centroid_x_mm - (frame_center_x * conversion_factor)
+                            distance_from_center_y = centroid_y_mm - (frame_center_y * conversion_factor)
+
+                            # Display distance from center at the center of the object's bounding box
+                            distance_message = f'Dist from Center: (X:{distance_from_center_x:.2f} mm, Y:{distance_from_center_y:.2f} mm)'
+                            text_size, _ = cv2.getTextSize(distance_message, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+                            text_origin = (centroid_x - text_size[0] // 2, centroid_y + text_size[1] // 2)
+
+                            cv2.putText(im0, distance_message, text_origin, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_thickness, lineType=cv2.LINE_AA)
+
+                        # Update previous centroid coordinates
+                        prev_centroid_x_mm = centroid_x_mm
+                        prev_centroid_y_mm = centroid_y_mm
+
+
+
+
+
+
+                    
+                            
+
+
+
         cv2.imshow(str(p), im0)
-        cv2.waitKey(1)
+        if cv2.waitKey(1) == ord('q'):  # q to quit
+            break
+
+    pipeline.stop()
+    cv2.destroyAllWindows()
 
 
-    if save_txt or save_img:
-        s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
-        print(f"Results saved to {save_dir}{s}")
 
-    #print(f'Done. ({time.time() - t0:.3f}s)')
 
+   
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
